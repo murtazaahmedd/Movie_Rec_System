@@ -1,14 +1,12 @@
+from flask import Flask, render_template, request, jsonify
 import numpy as np
 import pandas as pd
-import tensorflow as tf
-from tensorflow import keras
-from keras.models import load_model
-from flask import Flask, render_template, request, jsonify
+from tensorflow.keras.models import load_model
 
 # Load pre-trained model
 model = load_model('movie_recommendation_model.h5')
 
-# Load data (you can modify the paths as per your structure)
+# Load data (adjust paths as needed)
 movies = pd.read_csv('dataset/movies.csv')
 ratings = pd.read_csv('dataset/ratings.csv')
 
@@ -28,11 +26,13 @@ max_rating = max(ratings['rating'])
 min_rating = min(ratings['rating'])
 ratings['rating'] = ratings['rating'].apply(lambda x: (x - min_rating) / (max_rating - min_rating))
 
+# Extract unique genres
 genres = set()
 for genre_list in movies['genres']:
     genres.update(genre_list.split('|'))
 genres = list(genres)
 
+# Create genre columns
 for genre in genres:
     movies[genre] = movies['genres'].apply(lambda x: 1 if genre in x else 0)
 
@@ -45,14 +45,20 @@ def recommend_movies(user_id, selected_genres, top_n=10):
     movies_watched = ratings[ratings['user'] == user_encoder][['movieId', 'rating']]
     liked_movies = movies_watched[movies_watched['rating'] > 0.8]
 
+    # Movies that the user has not watched
     movies_not_watched = movies[~movies["movieId"].isin(movies_watched['movieId'])]["movieId"]
     movies_not_watched = list(set(movies_not_watched).intersection(set(moviecoded.keys())))
+    
     user_movie_array = np.hstack(([[user_encoder]] * len(movies_not_watched), [[moviecoded[x]] for x in movies_not_watched]))
 
     predicted_ratings = model.predict([user_movie_array[:, 0], user_movie_array[:, 1]]).flatten()
 
-    # Filter movies by selected genres
-    filtered_movies = movies[movies[selected_genres].sum(axis=1) > 0]
+    # Handle both single and multiple genre selections
+    if isinstance(selected_genres, list):  # Multiple genres selected
+        filtered_movies = movies[movies[selected_genres].sum(axis=1) > 0]
+    else:  # Single genre selected
+        filtered_movies = movies[movies[selected_genres] == 1]
+
     filtered_movie_ids = filtered_movies['movieId'].values
     filtered_predicted_ratings = {}
 
@@ -62,12 +68,14 @@ def recommend_movies(user_id, selected_genres, top_n=10):
             if index < len(predicted_ratings):
                 filtered_predicted_ratings[movie_id] = predicted_ratings[index]
 
+    # Sort by predicted ratings and get top N
     top_movies = sorted(filtered_predicted_ratings.items(), key=lambda x: x[1], reverse=True)[:top_n]
     recommended = [{"title": movies[movies["movieId"] == movie_id]["title"].values[0],
                     "genres": movies[movies["movieId"] == movie_id]["genres"].values[0]}
                    for movie_id, _ in top_movies]
 
     return recommended
+
 
 # Initialize Flask app
 app = Flask(__name__)
